@@ -1,0 +1,600 @@
+---
+title: "Boston_Regularisation"
+author: "Priya"
+date: "1/3/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Clear the Environment
+
+```{r}
+rm(list=ls(all=TRUE))
+```
+```{r}
+getwd()
+```
+
+### Objective
+
+Predicting Boston Housing Prices
+
+## Read and Understand the data
+
+```{r}
+Boston_Reg = read.csv("Boston.csv", header = T)
+
+str(Boston_Reg)
+
+summary(Boston_Reg)
+```
+## Train-Test Split
+
+* Split the data into train and test
+
+```{r}
+library(tidyverse)
+library(caret)
+library(glmnet)
+set.seed(123)
+
+train_rows = Boston_Reg$MV %>% createDataPartition( p = 0.80, list = FALSE)
+
+
+train = Boston_Reg[train_rows,]
+
+test = Boston_Reg[-train_rows,]
+```
+
+## 1)  Get the data into a compatible format
+
+* i) y for storing the outcome variable, x for holding the predictor variables. 
+* ii) using the function model.matrix() allowing to automatically transform any        qualitative variables (if any) into dummy variables which is important because glmnet() can only take numerical, quantitative inputs. 
+* iii) remove the intercept component at index = 1.
+```{r}
+#Predictor variables
+x <- model.matrix(MV~., train)[,-1]
+# Outcome variable
+y <- train$MV
+```
+
+
+### a) Ridge Regression
+
+$$\min_\beta[RSS(\beta) + \lambda \sum_{j=1}^{p} \beta_j^2]$$
+* The alpha value is 0 for ridge regression
+```{r}
+
+cv_ridge <- cv.glmnet(x, y, alpha = 0)
+
+plot(cv_ridge)
+
+```
+
+```{r}
+plot(cv_ridge$glmnet.fit, xvar = "lambda", label = TRUE)
+
+```
+
+### Choosing a lambda for Ridge Regression
+
+* We can access the lambda and the coefficients as we did before
+
+```{r}
+cv_ridge$lambda.min
+```
+## Building The Final Ridge Regression Model
+
+* By using the optimal lambda values obtained above, we can build our ridge models
+
+```{r}
+ridge_model <-glmnet(x, y, alpha = 0, lambda = cv_ridge$lambda.min)
+
+coef(ridge_model)
+```
+
+## Evaluating the Final Elastic Net Regression Model
+
+* Use the model to predict on test data
+
+```{r}
+library(dplyr)
+x.test <- model.matrix(MV ~., test)[,-1]
+predictions <- ridge_model %>% predict(x.test) %>% as.vector()
+```
+## Model Performance Evaluation
+
+## Ridge Regression Model Metrics
+
+```{r}
+library(DMwR)
+regr.eval(trues = test$MV, preds = predictions)
+```
+##### OR
+```{r}
+rsq <- function (x, y) cor(x, y) ^ 2
+
+mape <- function(y, yhat)
+mean(abs((y - yhat)/y))
+
+data.frame(
+ # MSE = mse(predictions, test$MV)
+ MSE = mean( (predictions - test$MV)^2, na.rm = TRUE),
+ MAE = MAE(predictions, test$MV),
+ RMSE = RMSE(predictions, test$MV),
+ R2 = rsq(predictions, test$MV),
+ MAPE= mape(test$MV, predictions)
+
+ # MAPE = mape(test$MV, predictions )
+ #MAPE= rowMeans(abs((test$MV-predictions)/test$M) * 100)
+
+)
+
+```
+
+
+## b) Lasso Regression
+
+* The alpha value is 1 for lasso regression
+```{r}
+set.seed(123) 
+cv_lasso = cv.glmnet(x, y, alpha = 1, type.measure = "mse", nfolds = 4)
+
+plot(cv_lasso)
+
+```
+```{r}
+plot(cv_lasso$glmnet.fit, xvar = "lambda", label = TRUE)
+```
+
+* The object returned form the call to cv.glmnet() function, contains the lambda values of importance.
+
+* The coefficients are accessible calling the coef() function on the cv_lasso object
+
+```{r}
+cv_lasso$lambda.min
+coef(cv_lasso)
+```
+
+## Building the Final Lasso Regression Model
+
+* By using the optimal lambda values obtained above, we can build our lasso models
+
+```{r}
+lasso_model <- glmnet(x, y, lambda = cv_lasso$lambda.min, alpha = 1)
+
+coef(lasso_model)
+```
+
+## Evaluating the Final Elastic Net Regression Model
+
+* Use the model to predict on test data
+
+```{r}
+x.test <- model.matrix(MV ~., test)[,-1]
+predictions <- lasso_model %>% predict(x.test) %>% as.vector()
+```
+
+## Model performance metrics
+
+```{r}
+library(DMwR)
+regr.eval(trues = test$MV, preds = predictions)
+```
+
+```{r}
+
+rsq <- function (x, y) cor(x, y) ^ 2
+
+mape <- function(y, yhat)
+mean(abs((y - yhat)/y))
+
+data.frame(
+ MSE = mean( (predictions - test$MV)^2, na.rm = TRUE),
+ MAE = MAE(predictions, test$MV),
+ RMSE = RMSE(predictions, test$MV),
+ R2 = rsq(predictions, test$MV),
+ MAPE= mape(test$MV, predictions)
+)
+```
+# c) ElasticNet Regression
+
+$$\min_\beta[RSS(\beta) + \lambda \sum_{j=1}^{p}(\alpha|\beta_j| + (1-\alpha)\beta_j^2))]$$
+```{r}
+set.seed(123)
+elastic_net_model <- train(MV ~ ., train,
+                           method = "glmnet", 
+                           trControl = trainControl("cv", number =                            10), tuneLength = 10, metric = "RMSE"
+    
+                           )
+
+elastic_net_model
+```
+### Best tuning parameter
+
+```{r}
+elastic_net_model$bestTune
+```
+
+```{r}
+
+plot(elastic_net_model)
+
+```
+```{r}
+# Coefficient of the final model. You need
+# to specify the best lambda
+coef(elastic_net_model$finalModel, elastic_net_model$bestTune$lambda)
+```
+
+
+## Evaluating the Final Elastic Net Regression Model
+
+* Use the model to predict on test data
+
+```{r}
+x.test <- model.matrix(MV ~., test)[,-1]
+predictions <- elastic_net_model %>% predict(x.test)
+```
+## Model Performance Evaluation
+
+## Elastic Net Regression Model Metrics
+
+```{r}
+# Model performance metrics
+regr.eval(trues = test$MV, preds = predictions)
+```
+#### OR
+```{r}
+rsq <- function (x, y) cor(x, y) ^ 2
+
+mape <- function(y, yhat)
+mean(abs((y - yhat)/y))
+
+data.frame(
+ MSE = mean( (predictions - test$MV)^2, na.rm = TRUE),
+ MAE = MAE(predictions, test$MV),
+ RMSE = RMSE(predictions, test$MV),
+ R2 = rsq(predictions, test$MV),
+ MAPE= mape(test$MV, predictions)
+)
+```
+
+# A) Comparing The Different Models #
+
+### Setup a grid range of lambda values
+
+```{r}
+lambda <- 10^seq(-3, 3, length = 100)
+
+```
+## i) Compute ridge regression:
+
+```{r}
+# Build the model
+set.seed(123)
+cv_ridge <- train(
+  MV ~., data = train, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneGrid = expand.grid(alpha = 0, lambda = lambda)
+  )
+# Model coefficients
+coef(cv_ridge$finalModel, cv_ridge$bestTune$lambda)
+# Make predictions
+predictions <- cv_ridge %>% predict(test)
+# Model prediction performance
+regr.eval(trues = test$MV, preds = predictions)
+#or
+rsq <- function (x, y) cor(x, y) ^ 2
+
+mape <- function(y, yhat)
+mean(abs((y - yhat)/y))
+
+data.frame(
+ MSE = mean( (predictions - test$MV)^2, na.rm = TRUE),
+ MAE = MAE(predictions, test$MV),
+ RMSE = RMSE(predictions, test$MV),
+ R2 = rsq(predictions, test$MV),
+ MAPE= mape(test$MV, predictions)
+)
+```
+## ii) Compute lasso regression
+```{r}
+# Build the model
+set.seed(123)
+cv_lasso <- train(
+MV ~., data = train, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneGrid = expand.grid(alpha = 1, lambda = lambda)
+  )
+# Model coefficients
+coef(cv_lasso$finalModel, cv_lasso$bestTune$lambda)
+# Make predictions
+predictions <- cv_lasso %>% predict(test)
+# Model prediction performance
+regr.eval(trues = test$MV, preds = predictions)
+#or
+rsq <- function (x, y) cor(x, y) ^ 2
+
+mape <- function(y, yhat)
+mean(abs((y - yhat)/y))
+
+data.frame(
+ MSE = mean( (predictions - test$MV)^2, na.rm = TRUE),
+ MAE = MAE(predictions, test$MV),
+ RMSE = RMSE(predictions, test$MV),
+ R2 = rsq(predictions, test$MV),
+ MAPE= mape(test$MV, predictions)
+)
+
+```
+## iii) Elastic net regression
+```{r}
+# Build the model
+set.seed(123)
+elastic_net_model <- train(
+ MV ~., data = train, method = "glmnet",
+  trControl = trainControl("cv", number = 10),
+  tuneLength = 10
+  )
+# Model coefficients
+coef(elastic_net_model$finalModel, elastic_net_model$bestTune$lambda)
+# Make predictions
+predictions <- elastic_net_model %>% predict(test)
+# Model prediction performance
+regr.eval(trues = test$MV, preds = predictions)
+#or
+rsq <- function (x, y) cor(x, y) ^ 2
+
+mape <- function(y, yhat)
+mean(abs((y - yhat)/y))
+
+data.frame(
+ MSE = mean( (predictions - test$MV)^2, na.rm = TRUE),
+ MAE = MAE(predictions, test$MV),
+ RMSE = RMSE(predictions, test$MV),
+ R2 = rsq(predictions, test$MV),
+ MAPE= mape(test$MV, predictions)
+)
+```
+## iv) Comparing models performance
+
+* The best model is defined as the one that minimizes the prediction error.
+```{r}
+length(cv_ridge)
+length(cv_lasso)
+length(elastic_net_model)
+models <- list(ridge = cv_ridge, lasso = cv_lasso, elastic = elastic_net_model)
+resamples(models) %>% summary( metric = "RMSE")
+```
+* elastic net model has the lowest median RMSE.
+
+########################################################################
+
+# 2) Dimension Reduction Methods
+
+## PCR with Cross-Validation
+```{r}
+set.seed(10857825)
+pcr_model <- train(MV ~ .,
+                  data = train,
+                  method = "pcr",
+                  preProcess = c("center", "scale"),
+                  tuneGrid = expand.grid(ncomp = 1:13),
+                  trControl = trainControl(method= "cv"))
+summary(pcr_model)
+```
+
+
+```{r}
+pcr_pred <- predict(pcr_model, test)
+mean((pcr_pred - test$MV)^2)
+```
+
+### plotting for Principal Component Regression Predicted VS Observed
+
+```{r}
+df_pcr <- data.frame(predicted = pcr_pred, observed = test$MV,
+                    residual = test$MV - pcr_pred)
+
+ggplot(df_pcr, aes(x = predicted, y = observed)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  ggtitle("Principal Component Regression Predicted VS Observed")
+```
+
+### plotting for Principal Component Regression Predicted VS Residual
+
+```{r}
+ggplot(df_pcr, aes(x = predicted, y = residual)) +
+  geom_point() +
+  geom_hline(yintercept = 0, colour = "blue") +
+  ggtitle("Principal Component Regression Predicted VS Residual")
+```
+
+## PLS with Cross-Validation
+
+```{r}
+set.seed(10857825)
+pls_model <- train(MV ~ .,
+                  data = train,
+                  method = "pls",
+                  preProcess = c("center", "scale"),
+                  tuneGrid = expand.grid(ncomp = 1:13),
+                  trControl = trainControl(method= "cv"))
+pls_model
+```
+
+### predict
+
+```{r}
+pls_pred <- predict(pls_model, test)
+mean((pls_pred - test$MV)^2)
+```
+
+### plotting for Partial Least Squares Predicted VS Observed
+
+```{r}
+df_pls <- data.frame(predicted = pls_pred, observed = test$MV,
+                    residual = test$MV - pls_pred)
+
+ggplot(df_pls, aes(x = predicted, y = observed)) +
+  geom_point() +
+  geom_abline(intercept = 0, slope = 1, colour = "blue") +
+  ggtitle("Partial Least Squares Predicted VS Observed")
+```
+
+### plotting for Partial Least Squares Predicted VS Residual
+
+```{r}
+ggplot(df_pls, aes(x = predicted, y = residual)) +
+  geom_point() +
+  geom_hline(yintercept = 0, colour = "blue") +
+  ggtitle("Partial Least Squares Predicted VS Residual")
+```
+
+## visualization to compare pcr and pls models
+
+```{r}
+pcr_model$results$model <- "pcr"
+pls_model$results$model <- "pls"
+
+df_pcr_pls <- rbind(pcr_model$results, pls_model$results)
+ggplot(df_pcr_pls, aes(x = ncomp, y = RMSE, colour = model)) +
+  geom_line() +
+  geom_point() +
+  ggtitle("PCR VS PLS")
+```
+
+## rank the importance of the predictors
+
+```{r}
+pls_imp <- varImp(pls_model, scale = FALSE)
+plot(pls_imp, scales = list(y = list(cex = .95)))
+```
+##################################################################################
+
+
+# 3) Computing PCA
+
+* There are 2 function in R for computing PCA on a dataset - prcomp() and princomp().
+
+Primary Differences - 
+
+* princomp has a loadings and scores methods which gives the coordinates of all data points in new dimensions. This function is not available in prcomp() (although loadings can be seen in model output)
+
+* princomp has `cor` argument for centering to mean. prcomp has arguments `scale` and `center`
+
+```{r}
+Boston_df = Boston_Reg[,-c(14)]
+
+pca_prcomp <- prcomp(Boston_df, center = T, scale. = T)
+
+#pca_princomp <- princomp(Boston_df, cor = T)
+
+pca_prcomp
+```
+
+* Print PCA results
+
+```{r}
+summary(pca_prcomp)
+```
+
+```{r}
+library(factoextra)
+fviz_eig(pca_prcomp)
+```
+
+* View Eigen Values
+
+```{r}
+get_eigenvalue(pca_prcomp)
+```
+
+* Using Formula
+
+```{r}
+eigen(cov(scale(Boston_df)))
+```
+
+* Visualisation
+
+Projecting original dimensions on new dimesions
+
+```{r}
+fviz_pca_biplot(pca_prcomp,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+                )
+```
+
+### Linear Separability in the data
+
+* Compute the variance of each variable in the dataset
+
+* Plot the data across the two variables with the highest variance
+
+```{r}
+# Using lapply() function we apply the var() function on each of the variables excluding the target
+lapply(Boston_Reg[, -14], var)
+```
+```{r}
+# Plot the data points on the axes with the highest variances
+plot(Boston_Reg$TAX, Boston_Reg$B, col = Boston_Reg$MV, xlab = "TAX", ylab = "Black",
+    main = "Linear Separability before PCA")
+```
+
+```{r}
+pca_princomp = princomp(Boston_df, cor = T)
+
+Boston_pca_data = data.frame(pca_princomp$scores, Species = Boston_Reg$MV)
+
+plot(Boston_pca_data$Comp.9, Boston_pca_data$Comp.11, col = Boston_Reg$MV, xlab = "Principal Component 9", ylab = "Principal Component 11",  main = "Linear Separability after PCA")
+```
+
+## Split the data into train and test
+
+We have to remove the state variable, as it has very low information content
+
+* 80/20 split of train and test
+
+```{r}
+
+set.seed(420)
+
+train_rows <- sample(1:nrow(Boston_Reg), 0.8*nrow(Boston_Reg))
+
+train_data <- Boston_Reg[train_rows, ]
+
+test_data <- Boston_Reg[-train_rows, ]
+
+```
+
+## Scaled PCA computation
+
+* Remove the "MV" variable before scaling
+
+```{r}
+
+pca_scaled <- princomp(train_data[, !(names(train_data) %in% c("MV"))], cor = T)
+
+head(pca_scaled$scores)
+```
+
+# Apply PCA on the Test Data
+
+* Project the test data set onto the derived principal components
+
+```{r}
+
+test_pca_e <- as.data.frame(predict(pca_scaled, test_data[, !(names(train_data) %in% c("MV"))]))
+test_pca_e
+```
+####################################################################################
+
+
+
+
+
